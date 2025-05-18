@@ -7,6 +7,6 @@ import (
 
 func main() {
 	porter := port.New(10)
-	b := balancer.New(porter)
+	b := balancer.New(5, porter)
 	b.Serve()
 }

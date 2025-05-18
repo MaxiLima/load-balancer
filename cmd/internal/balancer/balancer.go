@@ -17,11 +17,11 @@ type Balancer struct {
 	pool   *ServerPool
 }
 
-func New(porter *port.Service) *Balancer {
+func New(instances int, porter *port.Service) *Balancer {
 	pool := &ServerPool{backends: make([]*instance.Backend, 0)}
 	balancer := &Balancer{porter: porter, pool: pool}
 
-	for i := 1; i < 5; i++ {
+	for i := 0; i < instances; i++ {
 		instancePort, err := porter.GetNext()
 		if err != nil {
 			log.Fatal(err)
