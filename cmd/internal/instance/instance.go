@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -88,6 +89,12 @@ func (b *Backend) SetAlive(alive bool) {
 }
 
 func (b *Backend) Ping() bool {
+	// from time to time we simulate a faulty instance so that we can see how the balancer handles it
+	// we have a 10% chance of getting 5 out of the interval [0, 9).
+	if rand.Intn(9) == 5 {
+		return false
+	}
+
 	timeout := 2 * time.Second
 	conn, err := net.DialTimeout("tcp", b.URL.Host, timeout)
 	if err != nil {

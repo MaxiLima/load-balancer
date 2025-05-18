@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"log"
-	"net/url"
 	"sync/atomic"
 
 	"load-balancer/cmd/internal/instance"
@@ -39,15 +38,5 @@ func (s *ServerPool) HealthCheck() {
 		alive := b.Ping()
 		b.SetAlive(alive)
 		log.Printf("(%s) backend ping returned %v\n", b.URL.String(), alive)
-	}
-}
-
-func (s *ServerPool) MarkBackendStatus(u *url.URL, alive bool) {
-	for _, b := range s.backends {
-		if b.URL.String() == u.String() {
-			b.SetAlive(alive)
-			log.Printf("(%s) backend status set to %v\n", b.URL.String(), alive)
-			return
-		}
 	}
 }
