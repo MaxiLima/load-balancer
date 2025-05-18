@@ -1,56 +1,40 @@
 package balancer
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"load-balancer/cmd/internal/instance"
+	"load-balancer/cmd/internal/platform/web"
+	"load-balancer/cmd/internal/port"
 )
 
 type Balancer struct {
-	pool *ServerPool
+	porter *port.Service
+	pool   *ServerPool
 }
 
-const (
-	Attempts int = iota
-	Retry
-)
-
-func New() *Balancer {
+func New(porter *port.Service) *Balancer {
 	pool := &ServerPool{backends: make([]*instance.Backend, 0)}
+	balancer := &Balancer{porter: porter, pool: pool}
 
 	for i := 1; i < 5; i++ {
-		port := 8080 + i
-		backend := instance.New(port)
+		instancePort, err := porter.GetNext()
+		if err != nil {
+			log.Fatal(err)
+		}
 
-		/*rp.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
-			log.Printf("%s: %s\n", u.Host, err.Error())
-			retries := GetRetryFromContext(request)
-			if retries < 3 {
-				select {
-				case <-time.After(10 * time.Millisecond):
-					ctx := context.WithValue(request.Context(), Retry, retries+1)
-					rp.ServeHTTP(writer, request.WithContext(ctx))
-				}
-			}
+		backend := instance.New(instancePort, balancer.lb)
 
-			pool.MarkBackendStatus(u, false)
-
-			attempts := GetAttemptsFromContext(request)
-			log.Printf("%s(%s) attempting retry %d\n", request.RemoteAddr, request.URL.Path, attempts)
-			ctx := context.WithValue(request.Context(), Attempts, attempts+1)
-			balancer.lb(writer, request.WithContext(ctx))
-		}*/
-
-		pool.backends = append(pool.backends, backend)
-
+		balancer.pool.backends = append(balancer.pool.backends, backend)
 		go backend.RunProxy()
 
 	}
 
-	return &Balancer{}
+	return balancer
 }
 
 func (b *Balancer) Serve() {
@@ -60,12 +44,12 @@ func (b *Balancer) Serve() {
 
 	go b.healthCheck()
 
-	log.Println("Server running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Printf("Server running at http://localhost:%d\n", b.porter.GetBasePort())
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", b.porter.GetBasePort()), router))
 }
 
 func (b *Balancer) lb(w http.ResponseWriter, r *http.Request) {
-	attempts := GetAttemptsFromContext(r)
+	attempts := web.GetAttemptsFromContext(r)
 	if attempts > 3 {
 		log.Printf("%s(%s) Max attempts reached, terminating\n", r.RemoteAddr, r.URL.Path)
 		http.Error(w, "Service not available", http.StatusServiceUnavailable)
@@ -92,18 +76,4 @@ func (b *Balancer) healthCheck() {
 			log.Println("Health check completed")
 		}
 	}
-}
-
-func GetRetryFromContext(r *http.Request) int {
-	if retry, ok := r.Context().Value(Retry).(int); ok {
-		return retry
-	}
-	return 0
-}
-
-func GetAttemptsFromContext(r *http.Request) int {
-	if attempts, ok := r.Context().Value(Attempts).(int); ok {
-		return attempts
-	}
-	return 0
 }

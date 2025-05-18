@@ -1,6 +1,7 @@
 package instance
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"load-balancer/cmd/internal/platform/web"
 )
 
 type Backend struct {
@@ -21,7 +24,7 @@ type Backend struct {
 	ReverseProxy *httputil.ReverseProxy
 }
 
-func New(port int) *Backend {
+func New(port int, errCallback http.HandlerFunc) *Backend {
 	u, _ := url.Parse(fmt.Sprintf("http://localhost:%d", port))
 
 	rp := httputil.NewSingleHostReverseProxy(u)
@@ -32,12 +35,34 @@ func New(port int) *Backend {
 		req.Host = u.Host
 	}
 
-	return &Backend{
+	back := &Backend{
+		port:         port,
 		URL:          u,
 		Alive:        true,
 		mux:          sync.RWMutex{},
 		ReverseProxy: rp,
 	}
+
+	back.ReverseProxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
+		log.Printf("%s: %s\n", u.Host, err.Error())
+		retries := web.GetRetryFromContext(request)
+		if retries < 3 {
+			select {
+			case <-time.After(10 * time.Millisecond):
+				ctx := context.WithValue(request.Context(), web.Retry, retries+1)
+				rp.ServeHTTP(writer, request.WithContext(ctx))
+			}
+		}
+
+		back.SetAlive(false)
+
+		attempts := web.GetAttemptsFromContext(request)
+		log.Printf("%s(%s) attempting retry %d\n", request.RemoteAddr, request.URL.Path, attempts)
+		ctx := context.WithValue(request.Context(), web.Attempts, attempts+1)
+		errCallback(writer, request.WithContext(ctx))
+	}
+
+	return back
 }
 
 func (b *Backend) RunProxy() {
